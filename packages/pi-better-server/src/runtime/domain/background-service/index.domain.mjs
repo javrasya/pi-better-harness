@@ -8,32 +8,49 @@ import { observeForegroundSandboxPolicy } from "./sandbox.domain.mjs";
 import { registerTools } from "./tools.domain.mjs";
 import { deliverBackgroundTasksPrompt } from "./prompt.domain.mjs";
 import { closeBackgroundObservation } from "./work-observation.domain.mjs";
-import { cursorKind } from "./shared-log-utils.domain.mjs";
+const INSPECTION_LIMIT = 3;
+const INSPECTION_WINDOW_MS = 30_000;
+function inspectionKey(toolName, input) {
+    switch (toolName) {
+        case "bg_status":
+        case "bg_logs":
+            return input.taskId ? `standalone:task:${input.taskId}` : "standalone:list";
+        case "bg_task_wait_list":
+            return "better:wait-list";
+        case "bg_task_list":
+            return "better:list";
+        case "bg_task_status":
+        case "bg_task_log":
+            return `better:task:${input.id}`;
+        case "bg_task":
+            if (input.action === "list")
+                return "better:list";
+            if (input.action === "status" || input.action === "log")
+                return `better:task:${input.id}`;
+    }
+}
 function guardRepeatedInspection(pi) {
     const reads = new Map();
-    pi.on("agent_start", () => { reads.clear(); });
-    pi.on("tool_call", ({ toolName, input: toolInput }) => {
-        const input = toolInput;
-        const action = toolName === "bg_task" ? input.action
-            : toolName === "bg_task_status" ? "status"
-                : toolName === "bg_task_log" ? "log"
-                    : toolName === "bg_task_list" ? "list" : undefined;
-        if (action !== "status" && action !== "log" && action !== "list")
+    pi.on("session_before_switch", () => { reads.clear(); });
+    pi.on("tool_call", ({ toolName, input }) => {
+        const key = inspectionKey(toolName, input);
+        if (key === undefined)
             return;
-        const cursor = typeof input.cursor === "string" ? input.cursor : undefined;
-        const kind = cursorKind(cursor);
-        // New evidence pages are distinct reads; a changing status revision is still polling.
-        const page = kind === "s" || !kind ? undefined : cursor;
-        const key = JSON.stringify([action === "list" ? null : input.id, input.all === true, page]);
-        const count = reads.get(key) ?? 0;
-        if (count >= 3) {
+        const now = performance.now();
+        const cutoff = now - INSPECTION_WINDOW_MS;
+        for (const [readKey, timestamps] of reads) {
+            if (timestamps.at(-1) <= cutoff)
+                reads.delete(readKey);
+        }
+        const recent = reads.get(key)?.filter(time => time > cutoff) ?? [];
+        if (recent.length >= INSPECTION_LIMIT) {
             return {
                 block: true,
                 terminate: true,
-                reason: "Repeated background inspection blocked for this agent run. Do not retry through another tool or shell. If a durable wait is already pending, end the turn and let the completion notification resume you. Otherwise register one wait for owned durable tasks, or leave callbacks enabled and yield for legacy tasks.",
+                reason: "Background inspection limit reached (3 checks in 30 seconds). Repeated polling costs tokens and money. Do not retry through another tool or shell. Yield for the completion notification, or check less often if no notification is available. If an owned durable task has no pending wait, register wait_for_operations once before yielding.",
             };
         }
-        reads.set(key, count + 1);
+        reads.set(key, [...recent, now]);
     });
 }
 export default function backgroundTasksExtension(pi) {

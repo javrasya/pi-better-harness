@@ -356,11 +356,15 @@ instead. A wait completion notification means every dependency is terminal,
 including failed, cancelled, timed-out or lost operations; it does not mean the
 command succeeded.
 
-The Pi frontend allows three inspections of the same task or list snapshot per
-agent run, shared across standalone tools and `bg_task` wrapper actions. A fourth
-read is blocked; Pi can end a tool-call batch consisting only of blocked reads.
-Distinct evidence pages and fresh runs (including completion follow-ups) can
-still read results. The guard does not cancel tasks or throttle background watchers.
+The Pi frontend allows three model-initiated reads per task ID or list in a
+rolling 30-second window, across agent turns. Status and logs share the task's
+budget, including `bg_task` wrappers and requests for more evidence pages. The
+wait list has its own budget. When the separate `pi-background-tasks` package is
+loaded, the frontend also guards its `bg_status` and `bg_logs` tools without
+replacing them. A blocked read does not extend the window. Pi can end a call
+batch consisting only of blocked reads. Polling costs tokens: yield for the
+completion notification instead, or check less often if none is available. The
+guard does not affect callbacks, mutations, or background watchers.
 
 Read each operation's status or log, interpret its terminal revision, then call
 `acknowledge_operation_result` with the wait identity, exact revisions, disposition

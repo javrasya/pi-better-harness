@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import extension from "./index.js";
 import { formatWaitView, type WaitView } from "./observed-waits.js";
@@ -39,8 +39,8 @@ it("stops repeated observation within one agent run, across standalone tools and
   }
   expect(pi.call("bg_task_status", { id: "another" })).toBeUndefined();
   expect(pi.call("bg_task", { action: "stop", id })).toBeUndefined();
-  pi.start(); // A new user request or completion follow-up can read fresh evidence.
-  expect(pi.call("bg_task_status", { id })).toBeUndefined();
+  pi.start();
+  expect(pi.call("bg_task_status", { id, all: true })).toMatchObject({ block: true, terminate: true });
 });
 
 it("counts changed status revisions as repeated reads", () => {
@@ -65,9 +65,42 @@ it("tells a pending parent to yield, not to fetch evidence before settlement", (
   expect(formatWaitView({ ...wait, phase: "ready", settled: true })).toContain("acknowledge_operation_result");
 });
 
-it("does not shadow pi-background-tasks' bg_status tool or guard its calls", () => {
+it("limits bg_status and bg_logs without shadowing them, reopening slots on a rolling window", () => {
+  vi.useFakeTimers({ toFake: ["performance"] });
+  try {
+    const pi = frontend();
+    const taskId = "other";
+    expect(pi.tools.has("bg_status")).toBe(false);
+    expect(pi.tools.has("bg_logs")).toBe(false);
+    pi.start();
+    expect(pi.call("bg_status", { taskId })).toBeUndefined();
+    vi.advanceTimersByTime(10_000);
+    expect(pi.call("bg_logs", { taskId })).toBeUndefined();
+    vi.advanceTimersByTime(10_000);
+    expect(pi.call("bg_status", { taskId })).toBeUndefined();
+    pi.start();
+    vi.advanceTimersByTime(9_999);
+    expect(pi.call("bg_logs", { taskId })).toMatchObject({
+      block: true, terminate: true, reason: expect.stringMatching(/polling.*cost.*notification/i),
+    });
+    vi.advanceTimersByTime(1);
+    expect(pi.call("bg_status", { taskId })).toBeUndefined();
+    expect(pi.call("bg_status", { taskId })).toMatchObject({ block: true });
+    vi.advanceTimersByTime(10_000);
+    expect(pi.call("bg_logs", { taskId })).toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("limits repeated task lists and wait lists without blocking mutations", () => {
   const pi = frontend();
-  expect(pi.tools.has("bg_task_status")).toBe(true);
-  expect(pi.tools.has("bg_status")).toBe(false);
-  for (let i = 0; i < 5; i++) expect(pi.call("bg_status", { taskId: "other" })).toBeUndefined();
+  for (let i = 0; i < 3; i++) {
+    expect(pi.call(i === 1 ? "bg_task" : "bg_task_list", { action: "list", limit: i + 1 })).toBeUndefined();
+    expect(pi.call("bg_task_wait_list", { pending_only: i === 1 })).toBeUndefined();
+  }
+  expect(pi.call("bg_task", { action: "list" })).toMatchObject({ block: true });
+  expect(pi.call("bg_task_wait_list", {})).toMatchObject({ block: true });
+  expect(pi.call("bg_task", { action: "clear" })).toBeUndefined();
+  expect(pi.call("wait_for_operations", { task_ids: ["bgs_build"] })).toBeUndefined();
 });
