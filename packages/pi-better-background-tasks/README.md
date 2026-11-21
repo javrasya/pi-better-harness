@@ -315,15 +315,18 @@ log, and metadata; the batch only groups them.
 
 ## Install
 
-```sh
-pi install npm:pi-better-background-tasks
-```
-
-Try it for one run:
+From this fork's checkout, install only the background-task package, not the
+whole harness:
 
 ```sh
-pi -e npm:pi-better-background-tasks
+npm ci
+pi install "$PWD/packages/pi-better-background-tasks"
 ```
+
+Restart Pi or use `/reload`. The local install loads from this checkout, so run
+`npm ci` again after updating it to regenerate the bundled runtime. The fork
+uses `bg_task` rather than exposing the `bg_status` alias, which would conflict
+with the separate `pi-background-tasks` package.
 
 ## Observed operations and waits
 
@@ -346,9 +349,18 @@ leader exits before cleanup can be verified. Descendants may remain running;
 inspect that evidence before interpreting the result.
 
 Call `wait_for_operations` with `task_ids` and an optional `continuation_note` to
-register an all-settled wait. The parent remains responsive. A wait completion notification means
-every dependency is terminal, including failed, cancelled, timed-out or lost
-operations; it does not mean the command succeeded.
+register one all-settled wait when no independent work remains. If it is pending,
+end the turn; do not check status, list or logs to wait for completion. If a durable
+wait is unavailable, leave callbacks enabled and yield for the completion callback
+instead. A wait completion notification means every dependency is terminal,
+including failed, cancelled, timed-out or lost operations; it does not mean the
+command succeeded.
+
+The Pi frontend allows three inspections of the same task or list snapshot per
+agent run, shared across standalone tools and `bg_task` wrapper actions. A fourth
+read is blocked; Pi can end a tool-call batch consisting only of blocked reads.
+Distinct evidence pages and fresh runs (including completion follow-ups) can
+still read results. The guard does not cancel tasks or throttle background watchers.
 
 Read each operation's status or log, interpret its terminal revision, then call
 `acknowledge_operation_result` with the wait identity, exact revisions, disposition

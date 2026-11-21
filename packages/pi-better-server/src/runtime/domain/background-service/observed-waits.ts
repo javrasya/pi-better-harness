@@ -1580,8 +1580,7 @@ export class ObservedWaitHost {
       `Started durable background ${launch.kind === "watch" ? "watch" : "process"} ${launch.id} (operation ${launch.operationId}).`,
       `Owner: ${launch.owner.kind} ${launch.owner.sessionId}.${launch.owner.branchId ? ` branch ${launch.owner.branchId}` : ""}`.trim(),
       `Status: ${launch.status}; supervisor ${launch.started ? "started" : "reported the existing execution"}${launch.claimed ? ", runner claimed" : ", runner claim pending"}.`,
-      `Inspect with bg_task_status ${launch.id}; read output with bg_task_log ${launch.id}; stop with bg_task_stop ${launch.id}.`,
-      "Never poll in the foreground. Register wait_for_operations when no independent work remains.",
+      "When no independent work remains, register wait_for_operations once and yield if it reports a pending wait. Do not poll status or logs.",
     ];
     if (launch.firstCheck) {
       lines.push(`First check: exit=${launch.firstCheck.exitCode ?? "null"}${launch.firstCheck.signal ? ` signal=${launch.firstCheck.signal}` : ""}.`);
@@ -2142,7 +2141,9 @@ export class ObservedWaitHost {
     } else {
       lines.push("wait: none pending for this owner");
     }
-    lines.push("Read the terminal evidence with bg_task_log before acknowledging a wait.");
+    if (view.terminalRevision === 0) {
+      lines.push("No terminal evidence yet. Do not poll status or logs; yield if a wait is pending or register one when no independent work remains.");
+    }
     return lines.join("\n");
   }
 
@@ -4565,11 +4566,13 @@ export function formatWaitView(view: WaitView): string {
   if (view.evidence.length) {
     lines.push(`evidence: ${view.evidence.map((entry) => `${entry.kind}:${entry.ref}`).join(", ")}`);
   }
-  lines.push(view.park
-    ? "Parked worker wait: resumption belongs to the registered continuation adapter."
-    : "The parent stays responsive; this registration never blocks the model.");
+  if (view.park) {
+    lines.push("Parked worker wait: resumption belongs to the registered continuation adapter.");
+  } else if (view.phase === "waiting" && !view.settled) {
+    lines.push("Wait registered. If no independent work remains, end the turn and let the completion notification resume you. Do not poll or register another wait.");
+  }
   if (view.settled) {
-    lines.push("Read the terminal evidence with bg_task_status and bg_task_log, then call acknowledge_operation_result with the exact revisions.");
+    lines.push("Read terminal status and any needed logs, then call acknowledge_operation_result with the exact revisions.");
   }
   return lines.join("\n");
 }
