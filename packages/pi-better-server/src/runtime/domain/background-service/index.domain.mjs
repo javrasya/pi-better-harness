@@ -8,6 +8,34 @@ import { observeForegroundSandboxPolicy } from "./sandbox.domain.mjs";
 import { registerTools } from "./tools.domain.mjs";
 import { deliverBackgroundTasksPrompt } from "./prompt.domain.mjs";
 import { closeBackgroundObservation } from "./work-observation.domain.mjs";
+import { cursorKind } from "./shared-log-utils.domain.mjs";
+function guardRepeatedInspection(pi) {
+    const reads = new Map();
+    pi.on("agent_start", () => { reads.clear(); });
+    pi.on("tool_call", ({ toolName, input: toolInput }) => {
+        const input = toolInput;
+        const action = toolName === "bg_task" ? input.action
+            : toolName === "bg_task_status" ? "status"
+                : toolName === "bg_task_log" ? "log"
+                    : toolName === "bg_task_list" ? "list" : undefined;
+        if (action !== "status" && action !== "log" && action !== "list")
+            return;
+        const cursor = typeof input.cursor === "string" ? input.cursor : undefined;
+        const kind = cursorKind(cursor);
+        // New evidence pages are distinct reads; a changing status revision is still polling.
+        const page = kind === "s" || !kind ? undefined : cursor;
+        const key = JSON.stringify([action === "list" ? null : input.id, input.all === true, page]);
+        const count = reads.get(key) ?? 0;
+        if (count >= 3) {
+            return {
+                block: true,
+                terminate: true,
+                reason: "Repeated background inspection blocked for this agent run. Do not retry through another tool or shell. If a durable wait is already pending, end the turn and let the completion notification resume you. Otherwise register one wait for owned durable tasks, or leave callbacks enabled and yield for legacy tasks.",
+            };
+        }
+        reads.set(key, count + 1);
+    });
+}
 export default function backgroundTasksExtension(pi) {
     // The frontend owns native UI/delivery only. Mechanical tools run in the
     // fixed server service. Register their native definitions before the first turn.
@@ -33,13 +61,15 @@ export default function backgroundTasksExtension(pi) {
         observedWaits.close();
         navigator.clearBackgroundTasksNavigatorSession();
     });
-    pi.on("session_shutdown", async (_event, ctx) => {
+    pi.on("session_shutdown", async () => {
         closeBackgroundObservation(pi);
         // /reload, session replacement, and quit load a fresh instance; stop this one's timers (#324).
         observedWaits.close();
         navigator.clearBackgroundTasksNavigatorSession();
     });
-    registerTools(proxy, undefined, navigator.refreshBackgroundTasksNavigator, { resumeLocal: false });
+    guardRepeatedInspection(pi);
+    // The standalone pi-background-tasks package owns this name in our Pi setup.
+    registerTools(proxy, undefined, navigator.refreshBackgroundTasksNavigator, { resumeLocal: false, statusAlias: false });
     // Registered after registerTools so the callback batcher has its session
     // context before a reconciled delivery can enqueue a parent notification.
     pi.on("session_start", (event, ctx) => {

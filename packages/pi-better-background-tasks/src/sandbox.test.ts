@@ -920,7 +920,8 @@ backendDescribe("background application settings on a real launch", () => {
 
     const meta = startWatchTask(pi, {
       name: "repeating watch",
-      argv: [process.execPath, "-e", "console.log('pending')"],
+      // Keep the individual check cheap even when parallel suites are spawning Node processes.
+      argv: ["/bin/echo", "pending"],
       shell: false,
       interval_seconds: 0.2,
       timeout_seconds: 0,
@@ -928,11 +929,9 @@ backendDescribe("background application settings on a real launch", () => {
       success_when: { type: "stdout_contains", value: "never" },
     }, project);
     try {
-      const first = await waitFor(meta.id, (current) => current?.lastCheckedAt !== undefined, 5_000);
-      await waitFor(meta.id, (current) => (current?.lastCheckedAt ?? 0) > (first?.lastCheckedAt ?? 0), 5_000);
-      const remaining = 800 - (Date.now() - meta.startedAt);
-      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-      expect(readMeta(meta.id)?.status).toBe("running");
+      const afterCap = await waitFor(meta.id, (current) => (current?.lastCheckedAt ?? 0) > meta.startedAt + 500, 5_000);
+      expect(afterCap?.status).toBe("running");
+      expect(afterCap?.lastExitCode).toBe(0);
     } finally {
       await stopTask(pi, meta.id);
       rmSync(taskDir(meta.id), { recursive: true, force: true });

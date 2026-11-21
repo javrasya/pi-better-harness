@@ -725,7 +725,7 @@ describe("manager-domain SDK integration and native server acceptance", () => {
       const log = await harness.execute("bg_task_log", { id });
       expect(log).toContain("durable-visible");
 
-      const dismissed = await harness.execute("bg_status", { action: "clear", id });
+      const dismissed = await harness.execute("bg_task", { action: "clear", id });
       expect(dismissed).toContain("Dismissed durable operation");
       expect(await harness.execute("bg_task_list", { limit: 100 })).not.toContain(id);
       // Dismissal hides the row; it does not erase terminal evidence.

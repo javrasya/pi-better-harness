@@ -20,7 +20,12 @@ not special cases in the runtime.
 | `bg_task_log` | Read a bounded, terminal-aware tail (10 rows / 1 KiB). Params: `id`, `lines` (`0` = raw pages), `raw`, `cursor` (a raw `nextCursor`), `max_bytes` (log max 4 KiB; raw 16 KiB default, 64 KiB max), `all`. |
 | `bg_task_stop` | Cancel a watcher or terminate a process task owned by the current session. Params: `id`, `all` (stop another session's task, or one whose ownership cannot be verified). |
 | `bg_task` | Action-based wrapper for `spawn`, `watch`, `list`, `status`, `log`, `stop`, `clear`. |
-| `bg_status` | Small action wrapper for `list`, `status`, `log`, `stop`, `clear`. |
+
+Use these read tools for one-off inspection or after a completion notification,
+not as a wait loop. Register a durable wait once when needed, then yield for its
+notification. See [Observed operations and waits](../README.md#observed-operations-and-waits)
+for the fallback and repeated-read guard. Use `bg_task` for wrapper actions; this
+fork leaves the `bg_status` name available to the separate `pi-background-tasks` package.
 
 Output-control parameters are spelled the same across background tasks and
 subagents: `max_bytes` and `lines`. The older spellings `maxBytes` and

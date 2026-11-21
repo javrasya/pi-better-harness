@@ -625,9 +625,11 @@ describe("lost execution evidence", () => {
       `require("node:fs").appendFileSync(${JSON.stringify(counterPath)}, "run\\n"); setInterval(() => {}, 1000);`,
     ];
     const started = await supervisor.start({ token: "lost-token-0001", argv });
-    const running = await waitFor("live runner and command", () => {
+    const running = await waitFor("live runner and command with recorded startup", () => {
       const inspection = supervisor.inspect(started.taskId);
-      return inspection?.claim?.alive && inspection.command?.alive ? inspection : undefined;
+      // A live PID can be observed before Node executes the fixture's first statement.
+      return inspection?.claim?.alive && inspection.command?.alive && existsSync(counterPath)
+        && readFileSync(counterPath, "utf8").trim() === "run" ? inspection : undefined;
     });
     const runnerPid = running.claim!.pid;
     const commandPid = running.command!.pid;

@@ -43,7 +43,7 @@ describe('native durable explicit all-session cancellation', () => {
       expect(await requester.execute('bg_task',{action:'stop',id,request_id})).toMatch(/another execution owner|not_accepted/);
       // The same public request key from the original owner is a distinct admission.
       expect(await owner.execute('bg_task_stop',{id,request_id})).toContain('cancelled');
-      expect(await owner.execute('bg_status',{action:'stop',id,request_id})).toContain('cancelled');
+      expect(await owner.execute('bg_task',{action:'stop',id,request_id})).toContain('cancelled');
       const independent=readIntents();expect(independent).toHaveLength(2);
       expect(new Set(independent.map((intent:any)=>intent.idempotencyKey)).size).toBe(2);
       expect(independent.every((intent:any)=>intent.owner.sessionId==='native-owner')).toBe(true);

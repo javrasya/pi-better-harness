@@ -248,6 +248,8 @@ export function registerTools(pi, runtime, refreshNavigator = refreshBackgroundT
     const getActiveSession = () => activeSession;
     const schemas = new Map();
     const register = (definition) => {
+        if (options.statusAlias === false && definition.name === "bg_status")
+            return;
         // A reload must not share schema identity with the previous registration.
         const parameters = { ...definition.parameters };
         schemas.set(definition.name, parameters);
@@ -356,7 +358,7 @@ export function registerTools(pi, runtime, refreshNavigator = refreshBackgroundT
     register({
         name: "bg_task_status",
         label: "BG Status",
-        description: "Inspect one background task. Default output is a compact model-facing summary (1 KiB UTF-8) with matched condition, exit/signal, stop error, and failure counts before progress. Current-session only unless all:true; unknown ownership is a gap, not missing or healthy. Pass verbose:true only when full raw metadata is explicitly needed. Environment values are omitted. A raw log nextCursor passed as cursor continues the raw log page; an incidentCursor pages incidents that need action; history:true lists failure history too. After a terminal callback, call this first and call bg_task_log only if the summary is insufficient.",
+        description: "Inspect one background task after a completion notification or for a specific diagnostic. Never repeat status to wait for completion. Default output is a compact model-facing summary (1 KiB UTF-8) with matched condition, exit/signal, stop error, and failure counts before progress. Current-session only unless all:true; unknown ownership is a gap, not missing or healthy. Pass verbose:true only when full raw metadata is explicitly needed. Environment values are omitted. A raw log nextCursor passed as cursor continues the raw log page; an incidentCursor pages incidents that need action; history:true lists failure history too. After a terminal callback, call this first and call bg_task_log only if the summary is insufficient.",
         parameters: StatusParams,
         async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
             const origin = getCallbackOrigin(ctx);
@@ -434,8 +436,8 @@ export function registerTools(pi, runtime, refreshNavigator = refreshBackgroundT
         label: "Wait for Operations",
         description: "Register an all-settled durable wait on background operations owned by this session and return immediately. The parent stays responsive; a completion notification arrives when every listed operation is terminal. Reading the status/log and acknowledging the exact revisions is required before the wait is consumed. This never enqueues, merges, pushes, or resumes a model by itself.",
         promptGuidelines: [
-            "Call wait_for_operations when no independent work remains; a final answer that says you are waiting is not a registration.",
-            "After a settled wait, inspect bg_task_status and bg_task_log, then acknowledge_operation_result with the exact revisions.",
+            "Register one wait when no independent work remains. If it is pending, end the turn and wait for the notification; do not call status, list, log, sleep, or register another wait to check it.",
+            "Once the wait is settled, read each task's status, read its log only if more evidence is needed, then acknowledge_operation_result with the exact revisions.",
         ],
         parameters: WaitForOperationsParams,
         async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

@@ -442,11 +442,11 @@ function tailLines(text) {
 function pendingFirstCheckText(check) {
     switch (check.pending) {
         case "aborted":
-            return "First check still running; stopped waiting because the tool call was cancelled. The watch continues in the background; check it later with bg_task_status.";
+            return "First check still running; stopped waiting because the tool call was cancelled. The watch continues in the background. Do not poll; yield for the callback if enabled.";
         case "suspended":
-            return "First check still running when the session shut down. The watch continues when its session resumes; check it later with bg_task_status.";
+            return "First check still running when the session shut down. The watch continues when its session resumes. Do not poll; yield for the callback if enabled.";
         default:
-            return `First check still running after ${formatDuration(check.waitedMs)}; the watch continues in the background. Check it later with bg_task_status.`;
+            return `First check still running after ${formatDuration(check.waitedMs)}; the watch continues in the background. Do not poll; yield for the callback if enabled.`;
     }
 }
 /**
