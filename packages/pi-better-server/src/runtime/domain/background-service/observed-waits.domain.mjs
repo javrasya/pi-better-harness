@@ -1309,6 +1309,11 @@ export class ObservedWaitHost {
         return this.projectDurable(operation, now);
     }
     /** Check fresh terminal evidence without recording a read or importing results. */
+    /** Whether this parent session can see the task at all; unseen tasks are neither running nor terminal. */
+    ownsParentTask(origin, taskId) {
+        const operation = this.operationForTask(taskId);
+        return Boolean(operation && this.belongsToParentOrigin(operation, origin));
+    }
     isTerminalParentTask(origin, taskId) {
         const operation = this.operationForTask(taskId);
         if (!operation || !this.belongsToParentOrigin(operation, origin))

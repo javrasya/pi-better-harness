@@ -60,12 +60,14 @@ test('fixed Background adapter fences new admissions, accepts exact replay and r
                     id, status, callbackOrigin: { cwd: root, sessionId: 'native' }, logPath: childLog, startedAt: Date.now(),
                 }));
                 persist('running');
-                assert.deepEqual(await probe(), { terminal: false });
+                assert.deepEqual(await probe(), { terminal: false, running: true });
+                assert.deepEqual(await probe(false, true), { terminal: false, running: false });
                 persist('failed');
-                assert.deepEqual(await probe(), { terminal: true });
-                assert.deepEqual(await probe(false, true), { terminal: false });
-                assert.deepEqual(await probe(true, true), { terminal: true });
-                assert.deepEqual(await invoke('__background_is_terminal', { id: 'bgs_00000000000000000002' }), { terminal: false });
+                assert.deepEqual(await probe(), { terminal: true, running: false });
+                assert.deepEqual(await probe(false, true), { terminal: false, running: false });
+                assert.deepEqual(await probe(true, true), { terminal: true, running: false });
+                assert.deepEqual(await invoke('__background_is_terminal', { id: 'bgs_00000000000000000002' }), { terminal: false, running: false });
+                assert.deepEqual(await invoke('__background_is_terminal', { id: 'not-a-task' }), { terminal: false, running: false });
             } finally {
                 rmSync(registry.taskDir(id), { recursive: true, force: true });
             }

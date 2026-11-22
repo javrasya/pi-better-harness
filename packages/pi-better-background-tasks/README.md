@@ -360,8 +360,9 @@ The Pi frontend allows three model-initiated reads per task ID or list in a
 rolling 30-second window, across agent turns. Status and logs share the task's
 budget, including `bg_task` wrappers and requests for more evidence pages. If a
 `bg_task` status or log read would be blocked, the frontend checks fresh terminal
-evidence first and blocks only when the runtime reports the task still running;
-if the task has finished or the runtime cannot answer, the read goes through. A
+evidence first and blocks only when the runtime reports a task it can see as
+still running; if the task has finished, or the runtime cannot answer or cannot
+see the task, the read goes through. A
 read that ends in a tool error does not use up a slot. The wait list
 has its own budget. When the separate `pi-background-tasks` package is
 loaded, the frontend also guards its `bg_status` and `bg_logs` tools without

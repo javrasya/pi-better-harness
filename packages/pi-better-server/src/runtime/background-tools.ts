@@ -301,13 +301,21 @@ export async function createBackgroundTools(root: string, instance: string, drai
                 }
                 const origin = { cwd: record.owner.workspace, sessionId: record.owner.sessionId };
                 if (record.tool === '__background_is_terminal') {
+                    // running is true only for a task this caller can see that has not finished,
+                    // so the frontend never tells an agent to wait on a task it cannot observe.
                     const { id, all } = record.params;
-                    if (typeof id !== 'string') return { terminal: false };
-                    if (/^bgs_[0-9a-f]{20}$/.test(id)) return { terminal: service.isTerminalParentTask(origin, id) };
-                    if (!/^bg_[a-z0-9]+_[a-z0-9]+_\d+$/.test(id)) return { terminal: false };
+                    const unseen = { terminal: false, running: false };
+                    if (typeof id !== 'string') return unseen;
+                    if (/^bgs_[0-9a-f]{20}$/.test(id)) {
+                        if (!service.ownsParentTask(origin, id)) return unseen;
+                        const terminal = service.isTerminalParentTask(origin, id);
+                        return { terminal, running: !terminal };
+                    }
+                    if (!/^bg_[a-z0-9]+_[a-z0-9]+_\d+$/.test(id)) return unseen;
                     const { meta } = registry.inspectMeta(id);
-                    return { terminal: Boolean(meta && ['succeeded', 'failed', 'cancelled', 'timed_out'].includes(meta.status)
-                        && classifyOwnership(meta, { origin, all: all === true }) === 'allow') };
+                    if (!meta || classifyOwnership(meta, { origin, all: all === true }) !== 'allow') return unseen;
+                    const terminal = ['succeeded', 'failed', 'cancelled', 'timed_out'].includes(meta.status);
+                    return { terminal, running: !terminal };
                 }
                 if (record.tool === '__background_detail' || record.tool === '__background_action') {
                     const durable = service.readDurableTask(origin, record.params.id);

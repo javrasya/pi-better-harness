@@ -61,11 +61,12 @@ function guardRepeatedInspection(pi: ExtensionAPI): void {
       if (key.startsWith("better:task:") && "id" in input && typeof input.id === "string" && ctx) {
         // No cached running verdict: a task can finish between blocked reads.
         // Probe only the terminal bit, without fetching logs or consuming evidence.
-        // Block only on a confirmed running task: when the runtime cannot answer
-        // (for example a runtime older than this probe), the task may be done and
-        // its one notification already delivered, so a block would strand the agent.
-        return requestBackgroundTool(pi, ctx, randomUUID(), "__background_is_terminal", { id: input.id, all: "all" in input && input.all === true })
-          .then(result => result?.terminal === false ? { block: true, terminate: true, reason: RUNNING_TASK_LIMIT_REASON } : undefined, () => undefined);
+        // Block only on a task the runtime confirms it can see and is still running.
+        // When it cannot answer (for example a runtime older than this probe) or
+        // cannot see the task, the task may be done and its one notification
+        // already delivered, so a block would strand the agent.
+        return requestBackgroundTool(pi, ctx, randomUUID(), "__background_is_terminal", { id: input.id, all: input.all === true })
+          .then(result => result?.running === true ? { block: true, terminate: true, reason: RUNNING_TASK_LIMIT_REASON } : undefined, () => undefined);
       }
       return { block: true, terminate: true, reason: INSPECTION_LIMIT_REASON };
     }

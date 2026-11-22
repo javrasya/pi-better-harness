@@ -51,8 +51,8 @@ it("stops repeated observation within one agent run, across standalone tools and
 it("lets status and logs through a saturated budget as soon as terminal evidence is available", async () => {
   const pi = frontend(), id = "bgs_build", ctx = {};
   const request = vi.mocked(requestBackgroundTool);
-  request.mockReset().mockResolvedValueOnce({ terminal: false })
-    .mockResolvedValue({ terminal: true });
+  request.mockReset().mockResolvedValueOnce({ terminal: false, running: true })
+    .mockResolvedValue({ terminal: true, running: false });
 
   for (let i = 0; i < 3; i++) expect(pi.call("bg_task_status", { id }, ctx)).toBeUndefined();
   expect(request).not.toHaveBeenCalled();
@@ -71,6 +71,13 @@ it("lets a saturated read through when the runtime cannot say whether the task i
   vi.mocked(requestBackgroundTool).mockReset().mockRejectedValue(new Error("capability-mismatch: Background tool schema"));
   for (let i = 0; i < 3; i++) expect(pi.call("bg_task_log", { id }, ctx)).toBeUndefined();
   await expect(pi.call("bg_task_log", { id }, ctx)).resolves.toBeUndefined();
+});
+
+it("does not claim a task is running when the runtime cannot see it", async () => {
+  const pi = frontend(), id = "bgs_unknown", ctx = {};
+  vi.mocked(requestBackgroundTool).mockReset().mockResolvedValue({ terminal: false, running: false });
+  for (let i = 0; i < 3; i++) expect(pi.call("bg_task_status", { id }, ctx)).toBeUndefined();
+  await expect(pi.call("bg_task_status", { id }, ctx)).resolves.toBeUndefined();
 });
 
 it("does not count a read that ended in a tool error", () => {
