@@ -23,8 +23,10 @@ function frontend() {
   return {
     tools,
     start: () => hooks.get("agent_start")?.forEach(handler => handler({}, { isIdle: () => false })),
-    call: (toolName: string, input: Record<string, unknown>, ctx?: unknown) =>
-      hooks.get("tool_call")?.map(handler => handler({ toolName, input }, ctx)).find(Boolean),
+    call: (toolName: string, input: Record<string, unknown>, ctx?: unknown, toolCallId?: string) =>
+      hooks.get("tool_call")?.map(handler => handler({ toolName, input, toolCallId }, ctx)).find(Boolean),
+    result: (toolName: string, input: Record<string, unknown>, toolCallId: string, isError: boolean) =>
+      hooks.get("tool_result")?.forEach(handler => handler({ toolName, input, toolCallId, isError, content: [] })),
   };
 }
 
@@ -50,16 +52,38 @@ it("lets status and logs through a saturated budget as soon as terminal evidence
   const pi = frontend(), id = "bgs_build", ctx = {};
   const request = vi.mocked(requestBackgroundTool);
   request.mockReset().mockResolvedValueOnce({ terminal: false })
-    .mockRejectedValueOnce(new Error("observation unavailable"))
     .mockResolvedValue({ terminal: true });
 
   for (let i = 0; i < 3; i++) expect(pi.call("bg_task_status", { id }, ctx)).toBeUndefined();
   expect(request).not.toHaveBeenCalled();
-  await expect(pi.call("bg_task_status", { id }, ctx)).resolves.toMatchObject({ block: true });
-  await expect(pi.call("bg_task_log", { id }, ctx)).resolves.toMatchObject({ block: true });
+  await expect(pi.call("bg_task_status", { id }, ctx)).resolves.toMatchObject({
+    block: true, reason: expect.stringContaining("still running"),
+  });
   await expect(pi.call("bg_task", { action: "status", id }, ctx)).resolves.toBeUndefined();
   await expect(pi.call("bg_task_log", { id, cursor: "next" }, ctx)).resolves.toBeUndefined();
   expect(request).toHaveBeenLastCalledWith(expect.anything(), ctx, expect.any(String), "__background_is_terminal", { id, all: false });
+});
+
+it("lets a saturated read through when the runtime cannot say whether the task is terminal", async () => {
+  // A runtime that predates the terminal probe rejects it. Blocking then would tell the
+  // agent to wait for a notification that may already have been delivered.
+  const pi = frontend(), id = "bgs_build", ctx = {};
+  vi.mocked(requestBackgroundTool).mockReset().mockRejectedValue(new Error("capability-mismatch: Background tool schema"));
+  for (let i = 0; i < 3; i++) expect(pi.call("bg_task_log", { id }, ctx)).toBeUndefined();
+  await expect(pi.call("bg_task_log", { id }, ctx)).resolves.toBeUndefined();
+});
+
+it("does not count a read that ended in a tool error", () => {
+  const pi = frontend(), id = "bgs_build";
+  for (let i = 0; i < 3; i++) {
+    expect(pi.call("bg_task_status", { id }, undefined, `failed-${i}`)).toBeUndefined();
+    pi.result("bg_task_status", { id }, `failed-${i}`, true);
+  }
+  for (let i = 0; i < 3; i++) {
+    expect(pi.call("bg_task_log", { id }, undefined, `read-${i}`)).toBeUndefined();
+    pi.result("bg_task_log", { id }, `read-${i}`, false);
+  }
+  expect(pi.call("bg_task_log", { id }, undefined, "read-3")).toMatchObject({ block: true });
 });
 
 it("counts changed status revisions as repeated reads", () => {

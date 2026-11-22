@@ -31,35 +31,47 @@ function inspectionKey(toolName, input) {
                 return `better:task:${input.id}`;
     }
 }
+const INSPECTION_LIMIT_REASON = "Background inspection limit reached (3 checks in 30 seconds). Repeated polling costs tokens and money. Do not retry through another tool or shell. Yield for the completion notification, or check less often if no notification is available. If an owned durable task has no pending wait, register wait_for_operations once before yielding.";
+const RUNNING_TASK_LIMIT_REASON = "Background inspection limit reached (3 checks in 30 seconds), and the runtime reports this task is still running. Repeated polling costs tokens and money. Do not retry through another tool or shell. Yield for its completion notification. If it has no pending wait, register wait_for_operations once before yielding.";
 function guardRepeatedInspection(pi) {
+    // A read takes its slot when it is called, so parallel calls count; a read that
+    // ends in a tool error gives the slot back, since it showed the agent nothing.
     const reads = new Map();
     pi.on("session_before_switch", () => { reads.clear(); });
-    pi.on("tool_call", ({ toolName, input }, ctx) => {
+    pi.on("tool_result", ({ toolName, input, toolCallId, isError }) => {
+        const key = isError ? inspectionKey(toolName, input) : undefined;
+        if (key === undefined)
+            return;
+        const remaining = reads.get(key)?.filter(read => read.callId !== toolCallId);
+        if (remaining?.length)
+            reads.set(key, remaining);
+        else
+            reads.delete(key);
+    });
+    pi.on("tool_call", ({ toolName, input, toolCallId }, ctx) => {
         const key = inspectionKey(toolName, input);
         if (key === undefined)
             return;
         const now = performance.now();
         const cutoff = now - INSPECTION_WINDOW_MS;
-        for (const [readKey, timestamps] of reads) {
-            if (timestamps.at(-1) <= cutoff)
+        for (const [readKey, entries] of reads) {
+            if (entries.at(-1).time <= cutoff)
                 reads.delete(readKey);
         }
-        const recent = reads.get(key)?.filter(time => time > cutoff) ?? [];
+        const recent = reads.get(key)?.filter(read => read.time > cutoff) ?? [];
         if (recent.length >= INSPECTION_LIMIT) {
-            const blocked = {
-                block: true,
-                terminate: true,
-                reason: "Background inspection limit reached (3 checks in 30 seconds). Repeated polling costs tokens and money. Do not retry through another tool or shell. Yield for the completion notification, or check less often if no notification is available. If an owned durable task has no pending wait, register wait_for_operations once before yielding.",
-            };
             if (key.startsWith("better:task:") && "id" in input && typeof input.id === "string" && ctx) {
                 // No cached running verdict: a task can finish between blocked reads.
                 // Probe only the terminal bit, without fetching logs or consuming evidence.
+                // Block only on a confirmed running task: when the runtime cannot answer
+                // (for example a runtime older than this probe), the task may be done and
+                // its one notification already delivered, so a block would strand the agent.
                 return requestBackgroundTool(pi, ctx, randomUUID(), "__background_is_terminal", { id: input.id, all: "all" in input && input.all === true })
-                    .then(result => result?.terminal === true ? undefined : blocked, () => blocked);
+                    .then(result => result?.terminal === false ? { block: true, terminate: true, reason: RUNNING_TASK_LIMIT_REASON } : undefined, () => undefined);
             }
-            return blocked;
+            return { block: true, terminate: true, reason: INSPECTION_LIMIT_REASON };
         }
-        reads.set(key, [...recent, now]);
+        reads.set(key, [...recent, { time: now, callId: toolCallId }]);
     });
 }
 export default function backgroundTasksExtension(pi) {
