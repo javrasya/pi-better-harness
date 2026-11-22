@@ -1793,6 +1793,15 @@ export class ObservedWaitHost {
     return this.projectDurable(operation, now);
   }
 
+  /** Check fresh terminal evidence without recording a read or importing results. */
+  isTerminalParentTask(origin: BackgroundTaskCallbackOrigin, taskId: string): boolean {
+    const operation = this.operationForTask(taskId);
+    if (!operation || !this.belongsToParentOrigin(operation, origin)) return false;
+    if (operation.terminalRevision > 0) return true;
+    const snapshot = this.passiveSnapshot(taskId, this.observationDirectory(operation));
+    return snapshot?.terminal === true && snapshot.token === operation.launchToken;
+  }
+
   /** Rebuild a live incident from the runner checkpoint. Only the native handoff writes its receipt. */
   pendingStallAlert(origin: BackgroundTaskCallbackOrigin, taskId: string, waits: readonly { waitId: string; generation: number }[]) {
     const operation = this.operationForTask(taskId);

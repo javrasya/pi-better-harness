@@ -3,6 +3,9 @@ import { EventEmitter } from "node:events";
 import extension from "./index.js";
 import { formatWaitView, type WaitView } from "./observed-waits.js";
 import { inspectStatusRevision } from "./shared-log-utils.js";
+import { requestBackgroundTool } from "./managed-client.js";
+
+vi.mock("./managed-client.js", () => ({ requestBackgroundTool: vi.fn() }));
 
 type Handler = (event?: any, ctx?: any) => unknown;
 function frontend() {
@@ -20,8 +23,8 @@ function frontend() {
   return {
     tools,
     start: () => hooks.get("agent_start")?.forEach(handler => handler({}, { isIdle: () => false })),
-    call: (toolName: string, input: Record<string, unknown>) =>
-      hooks.get("tool_call")?.map(handler => handler({ toolName, input })).find(Boolean),
+    call: (toolName: string, input: Record<string, unknown>, ctx?: unknown) =>
+      hooks.get("tool_call")?.map(handler => handler({ toolName, input }, ctx)).find(Boolean),
   };
 }
 
@@ -41,6 +44,22 @@ it("stops repeated observation within one agent run, across standalone tools and
   expect(pi.call("bg_task", { action: "stop", id })).toBeUndefined();
   pi.start();
   expect(pi.call("bg_task_status", { id, all: true })).toMatchObject({ block: true, terminate: true });
+});
+
+it("lets status and logs through a saturated budget as soon as terminal evidence is available", async () => {
+  const pi = frontend(), id = "bgs_build", ctx = {};
+  const request = vi.mocked(requestBackgroundTool);
+  request.mockReset().mockResolvedValueOnce({ terminal: false })
+    .mockRejectedValueOnce(new Error("observation unavailable"))
+    .mockResolvedValue({ terminal: true });
+
+  for (let i = 0; i < 3; i++) expect(pi.call("bg_task_status", { id }, ctx)).toBeUndefined();
+  expect(request).not.toHaveBeenCalled();
+  await expect(pi.call("bg_task_status", { id }, ctx)).resolves.toMatchObject({ block: true });
+  await expect(pi.call("bg_task_log", { id }, ctx)).resolves.toMatchObject({ block: true });
+  await expect(pi.call("bg_task", { action: "status", id }, ctx)).resolves.toBeUndefined();
+  await expect(pi.call("bg_task_log", { id, cursor: "next" }, ctx)).resolves.toBeUndefined();
+  expect(request).toHaveBeenLastCalledWith(expect.anything(), ctx, expect.any(String), "__background_is_terminal", { id, all: false });
 });
 
 it("counts changed status revisions as repeated reads", () => {

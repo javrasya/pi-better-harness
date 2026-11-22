@@ -1,5 +1,7 @@
 import { shouldRestoreWorkObservation } from "./shared-work-client.mjs";
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { requestBackgroundTool } from "./managed-client.js";
 import { initializeNavigatorPanels } from "./shared-navigator-panels.ts";
 import { registerBackgroundTasksGoalProvider } from "./goal-provider.js";
 import { createBackgroundTasksNavigator } from "./navigator-provider.js";
@@ -33,7 +35,7 @@ function inspectionKey(toolName: string, input: Record<string, unknown>): string
 function guardRepeatedInspection(pi: ExtensionAPI): void {
   const reads = new Map<string, number[]>();
   pi.on("session_before_switch", () => { reads.clear(); });
-  pi.on("tool_call", ({ toolName, input }) => {
+  pi.on("tool_call", ({ toolName, input }, ctx) => {
     const key = inspectionKey(toolName, input);
     if (key === undefined) return;
 
@@ -44,11 +46,18 @@ function guardRepeatedInspection(pi: ExtensionAPI): void {
     }
     const recent = reads.get(key)?.filter(time => time > cutoff) ?? [];
     if (recent.length >= INSPECTION_LIMIT) {
-      return {
+      const blocked = {
         block: true,
         terminate: true,
         reason: "Background inspection limit reached (3 checks in 30 seconds). Repeated polling costs tokens and money. Do not retry through another tool or shell. Yield for the completion notification, or check less often if no notification is available. If an owned durable task has no pending wait, register wait_for_operations once before yielding.",
       };
+      if (key.startsWith("better:task:") && "id" in input && typeof input.id === "string" && ctx) {
+        // No cached running verdict: a task can finish between blocked reads.
+        // Probe only the terminal bit, without fetching logs or consuming evidence.
+        return requestBackgroundTool(pi, ctx, randomUUID(), "__background_is_terminal", { id: input.id, all: "all" in input && input.all === true })
+          .then(result => result?.terminal === true ? undefined : blocked, () => blocked);
+      }
+      return blocked;
     }
     reads.set(key, [...recent, now]);
   });

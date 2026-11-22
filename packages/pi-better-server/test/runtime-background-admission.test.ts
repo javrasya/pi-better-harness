@@ -13,7 +13,7 @@ test('fixed Background adapter fences new admissions, accepts exact replay and r
     const directory = join(root, 'background-tool-admission');
     mkdirSync(directory, { mode: 0o700 });
     const load = (name: string) => import(`../src/runtime/domain/background-service/${name}.domain.mjs`);
-    const [{ registerTools }, { backgroundDigest }, { readAdmissionStartToken }] = await Promise.all([load('tools'), load('managed-authority'), load('process-identity')]);
+    const [{ registerTools }, { backgroundDigest }, { readAdmissionStartToken }, registry] = await Promise.all([load('tools'), load('managed-authority'), load('process-identity'), load('registry')]);
     const supervision = new RuntimeResultSupervision(root, 'instance');
     const ports: Map<string, any> = (globalThis as any)[Symbol.for('pi-better-server:result-supervision-ports-v1')] ??= new Map();
     ports.set(root, { status() { supervision.reconcile(); return { hostId: supervision.hostId, epoch: supervision.epoch, reason: supervision.reason }; } });
@@ -48,6 +48,27 @@ test('fixed Background adapter fences new admissions, accepts exact replay and r
             assert.deepEqual(initial.tasks, [child]);
             const restored = await invoke('__background_poll', { knownActiveIds: [pointer.id] }, 'restore-poll', onBranch);
             assert.deepEqual(restored.tasks, [child, completed]);
+        });
+        await t.test('terminal probe checks fresh exact metadata and honors read scope', async () => {
+            const id = registry.nextTaskId();
+            registry.ensureTaskDir(id);
+            try {
+                const probe = (all = false, foreign = false) => invoke('__background_is_terminal', { id, all }, randomUUID(), r => {
+                    if (foreign) r.owner.sessionId = 'foreign';
+                });
+                const persist = (status: string) => writeFileSync(registry.metaPathFor(id), JSON.stringify({
+                    id, status, callbackOrigin: { cwd: root, sessionId: 'native' }, logPath: childLog, startedAt: Date.now(),
+                }));
+                persist('running');
+                assert.deepEqual(await probe(), { terminal: false });
+                persist('failed');
+                assert.deepEqual(await probe(), { terminal: true });
+                assert.deepEqual(await probe(false, true), { terminal: false });
+                assert.deepEqual(await probe(true, true), { terminal: true });
+                assert.deepEqual(await invoke('__background_is_terminal', { id: 'bgs_00000000000000000002' }), { terminal: false });
+            } finally {
+                rmSync(registry.taskDir(id), { recursive: true, force: true });
+            }
         });
         const childLogResult = await invoke('__background_log', {id:child.id,lines:1}, 'child-log', r => r.branchIds=['branch']);
         assert.equal(childLogResult.stdout,'child-log-proof');

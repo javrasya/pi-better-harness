@@ -358,8 +358,10 @@ command succeeded.
 
 The Pi frontend allows three model-initiated reads per task ID or list in a
 rolling 30-second window, across agent turns. Status and logs share the task's
-budget, including `bg_task` wrappers and requests for more evidence pages. The
-wait list has its own budget. When the separate `pi-background-tasks` package is
+budget, including `bg_task` wrappers and requests for more evidence pages. If a
+`bg_task` status or log read would be blocked, the frontend checks fresh terminal
+evidence first and lets the read through if the task has finished. The wait list
+has its own budget. When the separate `pi-background-tasks` package is
 loaded, the frontend also guards its `bg_status` and `bg_logs` tools without
 replacing them. A blocked read does not extend the window. Pi can end a call
 batch consisting only of blocked reads. Polling costs tokens: yield for the

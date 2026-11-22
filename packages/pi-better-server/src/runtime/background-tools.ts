@@ -10,9 +10,9 @@ import { acquireMutationStore } from './mutation-store.ts';
 export async function createBackgroundTools(root: string, instance: string, draining: () => boolean = () => false, observe?: (scope: Record<string, unknown>) => Promise<any>, verificationMs = 30000,
     trace?: (slot: number, phase: 'queued' | 'executing' | 'recovery' | 'read-pending' | 'read-returned' | 'tool-pending' | 'tool-returned' | 'settled') => void) {
     const load = (file: string) => import(`./domain/background-service/${file}.domain.mjs`);
-    const [{ createObservedWaitHost }, { registerTools }, { createBackgroundTaskRuntime }, sandbox, authority, permissions, registry, navigator, failures] = await Promise.all([
+    const [{ createObservedWaitHost }, { registerTools }, { createBackgroundTaskRuntime }, sandbox, authority, permissions, registry, navigator, failures, { classifyOwnership }] = await Promise.all([
         load('observed-waits'), load('tools'), load('runtime'), load('sandbox'), load('managed-authority'),
-        import(String('./domain/sandbox-policy/permission-settings.domain.mjs')), load('registry'), load('navigator-provider'), load('failures'),
+        import(String('./domain/sandbox-policy/permission-settings.domain.mjs')), load('registry'), load('navigator-provider'), load('failures'), load('output'),
     ]);
     const identity = await load('process-identity');
     const lease = acquireMutationStore(root);
@@ -300,6 +300,15 @@ export async function createBackgroundTools(root: string, instance: string, drai
                     return { ...projection, tasks, retryAfterMs, recoveryPending: service.hasPendingParentCallbackRecovery(), deliveries: outgoing };
                 }
                 const origin = { cwd: record.owner.workspace, sessionId: record.owner.sessionId };
+                if (record.tool === '__background_is_terminal') {
+                    const { id, all } = record.params;
+                    if (typeof id !== 'string') return { terminal: false };
+                    if (/^bgs_[0-9a-f]{20}$/.test(id)) return { terminal: service.isTerminalParentTask(origin, id) };
+                    if (!/^bg_[a-z0-9]+_[a-z0-9]+_\d+$/.test(id)) return { terminal: false };
+                    const { meta } = registry.inspectMeta(id);
+                    return { terminal: Boolean(meta && ['succeeded', 'failed', 'cancelled', 'timed_out'].includes(meta.status)
+                        && classifyOwnership(meta, { origin, all: all === true }) === 'allow') };
+                }
                 if (record.tool === '__background_detail' || record.tool === '__background_action') {
                     const durable = service.readDurableTask(origin, record.params.id);
                     const candidate = registry.readMeta(record.params.id);

@@ -2041,7 +2041,8 @@ describe("durable read-only projections", () => {
       ctx,
     });
     const wait = host.waitForParent(ctx, [launch.id], "read evidence");
-    await until(host, () => host.readDurableTask(origin, launch.id)?.terminal === true);
+    await until(host, () => host.isTerminalParentTask(origin, launch.id));
+    expect(host.isTerminalParentTask({ ...origin, sessionId: "foreign" }, launch.id)).toBe(false);
     if (timing === "snapshot-before-reconciliation") {
       expect(host.waitViewForParent(ctx, wait.waitId)?.dependencies[0]?.terminalRevision).toBe(0);
     }
